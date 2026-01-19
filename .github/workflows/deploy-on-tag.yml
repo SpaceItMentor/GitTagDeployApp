@@ -44,6 +44,7 @@ jobs:
         run: mvn -B -DskipTests package
 
       - name: Deploy artifact to server via SSH
+        if: ${{ secrets.SSH_PRIVATE_KEY != '' && secrets.SSH_USER != '' && secrets.SSH_HOST != '' && secrets.REMOTE_DIR != '' }}
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_USER: ${{ secrets.SSH_USER }}
@@ -58,6 +59,9 @@ jobs:
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
+          echo "Contents of target/:"
+          ls -la target || true
+
           JAR=$(ls target/*.jar 2>/dev/null | head -n 1 || true)
           if [ -z "$JAR" ]; then
             echo "No jar found in target/ — build failed or artifact name unexpected"
@@ -69,6 +73,7 @@ jobs:
 
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519 ${SSH_USER}@${SSH_HOST} \
             "nohup java -jar ${REMOTE_DIR}/${APP_NAME}-${APP_VERSION}.jar --APP_VERSION='${APP_VERSION}' --APP_AUTHOR='${APP_AUTHOR}' > ${REMOTE_DIR}/${APP_NAME}-${APP_VERSION}.log 2>&1 &" || true
+      
 
       - name: Send Telegram message via Bot API
         env:
@@ -80,13 +85,18 @@ jobs:
         run: |
           set -euo pipefail
           MSG=$(cat <<MSG
-          Сообщение
           Приложение: ${APP_NAME}
           Версия: ${APP_VERSION}
           Автор: ${APP_AUTHOR}
           MSG
           )
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+          RESP=$(curl -s -w "%{http_code}" -o /tmp/tg_resp.json -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT}" \
             --data-urlencode "text=${MSG}" \
-            --data-urlencode "parse_mode=HTML"
+            --data-urlencode "parse_mode=HTML")
+          echo "HTTP code: $RESP"
+          cat /tmp/tg_resp.json
+          if [ "$RESP" != "200" ]; then
+            echo "Telegram API returned HTTP $RESP"
+            exit 1
+          fi
