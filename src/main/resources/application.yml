@@ -1,0 +1,11 @@
+# application.yml
+spring:
+  application:
+    name: GitTagDeployApp
+
+  docker:
+    compose:
+      enabled: false
+
+server:
+  port: 8080

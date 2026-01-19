@@ -1,0 +1,92 @@
+name: Deploy on Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          TAG=${GITHUB_REF#refs/tags/}
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          if git for-each-ref --format='%(objecttype)' refs/tags/$TAG | grep -q tag; then
+            AUTHOR=$(git for-each-ref --format='%(taggername) <%(taggeremail)>' refs/tags/$TAG)
+          else
+            COMMIT=$(git rev-list -n 1 refs/tags/$TAG 2>/dev/null || git rev-parse HEAD)
+            AUTHOR=$(git show -s --format='%an <%ae>' $COMMIT)
+          fi
+          echo "author=$AUTHOR" >> $GITHUB_OUTPUT
+
+          APP_NAME=$(basename "$GITHUB_REPOSITORY")
+          echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
+
+      - name: Install JDK 17 and Maven
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y openjdk-17-jdk maven
+
+      - name: Build with Maven
+        run: mvn -B -DskipTests package
+
+      - name: Deploy artifact to server via SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
+          APP_NAME: ${{ steps.meta.outputs.app_name }}
+          APP_VERSION: ${{ steps.meta.outputs.tag }}
+          APP_AUTHOR: ${{ steps.meta.outputs.author }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          JAR=$(ls target/*.jar 2>/dev/null | head -n 1 || true)
+          if [ -z "$JAR" ]; then
+            echo "No jar found in target/ — build failed or artifact name unexpected"
+            exit 1
+          fi
+
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519 ${SSH_USER}@${SSH_HOST} "mkdir -p ${REMOTE_DIR}"
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519 "$JAR" ${SSH_USER}@${SSH_HOST}:${REMOTE_DIR}/${APP_NAME}-${APP_VERSION}.jar
+
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519 ${SSH_USER}@${SSH_HOST} \
+            "nohup java -jar ${REMOTE_DIR}/${APP_NAME}-${APP_VERSION}.jar --APP_VERSION='${APP_VERSION}' --APP_AUTHOR='${APP_AUTHOR}' > ${REMOTE_DIR}/${APP_NAME}-${APP_VERSION}.log 2>&1 &" || true
+
+      - name: Send Telegram message via Bot API
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+          APP_NAME: ${{ steps.meta.outputs.app_name }}
+          APP_VERSION: ${{ steps.meta.outputs.tag }}
+          APP_AUTHOR: ${{ steps.meta.outputs.author }}
+        run: |
+          set -euo pipefail
+          MSG=$(cat <<MSG
+          Сообщение
+          Приложение: ${APP_NAME}
+          Версия: ${APP_VERSION}
+          Автор: ${APP_AUTHOR}
+          MSG
+          )
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT}" \
+            --data-urlencode "text=${MSG}" \
+            --data-urlencode "parse_mode=HTML"

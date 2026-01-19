@@ -1,0 +1,26 @@
+# Treat text files and normalize line endings to LF in repo
+* text=auto
+
+# Force LF for common text files
+*.java text eol=lf
+*.xml  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.properties text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.sh   text eol=lf
+
+# Binary files — do not attempt to normalize or diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.jar binary
+*.exe binary
+
+# Prevent large generated files from being included in diffs
+target/** export-ignore
+
+# Help GitHub linguist detect primary language
+*.java linguist-language=Java
