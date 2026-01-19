@@ -44,7 +44,6 @@ jobs:
         run: mvn -B -DskipTests package
 
       - name: Deploy artifact to server via SSH
-        if: ${{ secrets.SSH_PRIVATE_KEY != '' && secrets.SSH_USER != '' && secrets.SSH_HOST != '' && secrets.REMOTE_DIR != '' }}
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_USER: ${{ secrets.SSH_USER }}
@@ -55,6 +54,13 @@ jobs:
           APP_AUTHOR: ${{ steps.meta.outputs.author }}
         run: |
           set -euo pipefail
+
+          # если секреты не заданы — пропускаем деплой (чёткий лог)
+          if [ -z "${SSH_PRIVATE_KEY:-}" ] || [ -z "${SSH_USER:-}" ] || [ -z "${SSH_HOST:-}" ] || [ -z "${REMOTE_DIR:-}" ]; then
+            echo "SSH secrets not set or incomplete — skipping deploy step"
+            exit 0
+          fi
+
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
@@ -73,6 +79,7 @@ jobs:
 
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519 ${SSH_USER}@${SSH_HOST} \
             "nohup java -jar ${REMOTE_DIR}/${APP_NAME}-${APP_VERSION}.jar --APP_VERSION='${APP_VERSION}' --APP_AUTHOR='${APP_AUTHOR}' > ${REMOTE_DIR}/${APP_NAME}-${APP_VERSION}.log 2>&1 &" || true
+      
       
 
       - name: Send Telegram message via Bot API
