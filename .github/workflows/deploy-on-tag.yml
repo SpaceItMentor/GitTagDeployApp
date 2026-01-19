@@ -91,16 +91,23 @@ jobs:
           APP_AUTHOR: ${{ steps.meta.outputs.author }}
         run: |
           set -euo pipefail
-          MSG=$(cat <<MSG
-          Приложение: ${APP_NAME}
-          Версия: ${APP_VERSION}
-          Автор: ${APP_AUTHOR}
-          MSG
-          )
+
+          # Экранируем &, <, > для безопасной отправки с parse_mode=HTML
+          esc() {
+            printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+          }
+
+          NAME_ESCAPED=$(esc "${APP_NAME:-}")
+          VER_ESCAPED=$(esc "${APP_VERSION:-}")
+          AUTHOR_ESCAPED=$(esc "${APP_AUTHOR:-}")
+
+          MSG="<b>Приложение:</b> ${NAME_ESCAPED}%0A<b>Версия:</b> ${VER_ESCAPED}%0A<b>Автор:</b> ${AUTHOR_ESCAPED}"
+
+          # отправляем и логируем тело ответа и HTTP код
           RESP=$(curl -s -w "%{http_code}" -o /tmp/tg_resp.json -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT}" \
             --data-urlencode "text=${MSG}" \
-            --data-urlencode "parse_mode=HTML")
+            -d "parse_mode=HTML")
           echo "HTTP code: $RESP"
           cat /tmp/tg_resp.json
           if [ "$RESP" != "200" ]; then
